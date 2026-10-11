@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How a BLDC motor works: six-step commutation</title>
+<style>
+:root{--bg:#fff;--fg:#1f2937;--mu:#6b7280;--bd:#cbd5e1;--cd:#f1f5f9;--A:#d97706;--B:#0d9488;--C:#7c3aed;--on:#16a34a}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--fg:#f1f5f9;--mu:#94a3b8;--bd:#334155;--cd:#1e293b}}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
+h1{font-size:20px;margin:0 0 6px}h2{font-size:15px;margin:0 0 6px}
+p{margin:0 0 8px;max-width:75ch}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:12px}
+.c{border:1px solid var(--bd);border-radius:8px;padding:10px;background:var(--bg)}
+svg{width:100%;height:auto;display:block}
+.k{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin:8px 0}
+button{font:inherit;padding:5px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--cd);color:var(--fg);cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible{outline:2px solid var(--B);outline-offset:2px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:4px 8px;border-bottom:1px solid var(--bd);text-align:left}
+tr.a td{background:var(--cd);font-weight:700}
+.m{color:var(--mu);font-size:13px}
+#info{font-variant-numeric:tabular-nums}
+</style></head><body>
+<h1>How a BLDC motor works</h1>
+<p>A BLDC motor has permanent magnets on the rotor and three windings (phases A, B and C) on the stator. The driver energises two of the three phases at a time, which creates a stator magnetic field, and the rotor tries to align with it. Hall sensors tell the driver where the rotor is, so every 60 electrical degrees it switches to the next of six states and keeps the field about 90° ahead of the rotor. That switching is commutation, the job the brushes do in a brushed DC motor.</p>
+<p class="m">Try it: switch Hall commutation off and press Next state (the rotor just aligns and stops), then switch it on and change the duty cycle.</p>
+<div class="k">
+<label>Duty cycle <input id="du" type="range" min="0" max="100" value="40"> <b id="duv">40%</b></label>
+<label><input id="cm" type="checkbox" checked> Hall commutation</label>
+<button id="st" disabled>Next state</button>
+<button id="dr">Direction: forward</button>
+</div>
+<div class="g">
+<div class="c"><h2>Motor cross-section</h2><svg id="mot" viewBox="0 0 300 300" role="img" aria-label="Stator coils, rotor magnet and stator field arrow"></svg>
+<p class="m">Red/blue = rotor magnet (N/S). Green arrow = stator field. Coils show + or − for the energised phases, dim = floating.</p></div>
+<div class="c"><h2>Driver switches</h2><svg id="inv" viewBox="0 0 300 150" role="img" aria-label="Three half-bridges with six switches"></svg>
+<p class="m">The + phase high-side switch is PWM'd, the − phase low-side switch stays on, the third phase floats. The duty cycle sets the average voltage: e<sub>a</sub> = D·V<sub>bus</sub>.</p>
+<h2>State table</h2>
+<table><thead><tr><th>Hall ABC</th><th>+ phase</th><th>− phase</th><th>Floating</th></tr></thead><tbody id="tb"></tbody></table>
+<p id="info" style="margin-top:8px"></p></div>
+</div>
+<div class="c" style="margin-top:14px"><h2>Phase pattern over one electrical revolution</h2>
+<svg id="wv" viewBox="0 0 360 140" role="img" aria-label="Six-step pattern of phases A, B and C versus rotor angle"></svg>
+<p class="m">Top = connected to + (high), bottom = connected to − (low), dashed middle = floating. The vertical line is the rotor angle. Speed follows the duty cycle, just like a DC motor follows its voltage.</p></div>
+<script>
+const $=i=>document.getElementById(i),R=Math.PI/180,NS='http://www.w3.org/2000/svg';
+const S=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e};
+const COL={A:'var(--A)',B:'var(--B)',C:'var(--C)'},PM=[['A','C'],['B','C'],['B','A'],['C','A'],['C','B'],['A','B']],HALL=['101','100','110','010','011','001'];
+let th=40,w=0,u=.4,dir=1,comm=true,man=0,last=0,lm=-1,cur,W0=20,K=70;
+const sec=t=>Math.floor((((t-30)%360)+360)%360/60),fld=m=>dir>0?150+60*m:60*m-30,stt=m=>PM[(((fld(m)-30)/60)%6+6)%6];
+const M=$('mot');
+S('circle',{cx:150,cy:150,r:128,fill:'var(--cd)',stroke:'var(--bd)'},M);
+S('circle',{cx:150,cy:150,r:76,fill:'var(--bg)',stroke:'var(--bd)'},M);
+const coils=[[0,'A','A'],[60,'C′','C'],[120,'B','B'],[180,'A′','A'],[240,'C','C'],[300,'B′','B']].map(([a,l,ph])=>{
+const x=150+102*Math.cos(a*R),y=150-102*Math.sin(a*R);
+const c=S('circle',{cx:x,cy:y,r:17,stroke:COL[ph],'stroke-width':2.5,fill:COL[ph],'fill-opacity':.08},M);
+const t=S('text',{x,y:y+7,'text-anchor':'middle','font-size':20,'font-weight':700,fill:'#fff'},M);
+S('text',{x:150+139*Math.cos(a*R),y:150-139*Math.sin(a*R)+4,'text-anchor':'middle','font-size':12,'font-weight':700,fill:COL[ph]},M).textContent=l;
+return{ph,c,t}});
+const rot=S('g',{},M);
+S('circle',{cx:150,cy:150,r:54,fill:'#2563eb'},rot);
+S('path',{d:'M150,96 A54,54 0 0 1 150,204 Z',fill:'#dc2626'},rot);
+S('text',{x:176,y:157,'text-anchor':'middle','font-size':20,'font-weight':700,fill:'#fff'},rot).textContent='N';
+S('text',{x:124,y:157,'text-anchor':'middle','font-size':20,'font-weight':700,fill:'#fff'},rot).textContent='S';
+const fa=S('g',{},M);
+S('path',{d:'M0,0 H72 M72,0 l-13,-8 M72,0 l-13,8',stroke:'var(--on)','stroke-width':4,'stroke-linecap':'round',fill:'none'},fa);
+const I=$('inv'),leg={};
+S('line',{x1:30,x2:270,y1:8,y2:8,stroke:'var(--fg)','stroke-width':2},I);S('text',{x:272,y:12,'font-size':11,fill:'var(--mu)'},I).textContent='Vbus';
+S('line',{x1:30,x2:270,y1:142,y2:142,stroke:'var(--fg)','stroke-width':2},I);S('text',{x:272,y:146,'font-size':11,fill:'var(--mu)'},I).textContent='GND';
+['A','B','C'].forEach((P,i)=>{const x=60+i*90;
+S('line',{x1:x,x2:x,y1:8,y2:142,stroke:'var(--bd)','stroke-width':2},I);
+const h=S('rect',{x:x-24,y:22,width:48,height:28,rx:4,stroke:'var(--bd)'},I),ht=S('text',{x:x,y:40,'text-anchor':'middle','font-size':12,fill:'var(--fg)'},I);
+const l=S('rect',{x:x-24,y:98,width:48,height:28,rx:4,stroke:'var(--bd)'},I),lt=S('text',{x:x,y:116,'text-anchor':'middle','font-size':12,fill:'var(--fg)'},I);
+S('circle',{cx:x,cy:74,r:5,fill:COL[P]},I);S('text',{x:x+10,y:78,'font-size':13,'font-weight':700,fill:COL[P]},I).textContent=P;
+leg[P]={h,ht,l,lt}});
+const wv=$('wv'),X=a=>24+a*330/360;
+function drawW(){wv.innerHTML='';const sg=[[0,30,5],[30,90,0],[90,150,1],[150,210,2],[210,270,3],[270,330,4],[330,360,5]];
+['A','B','C'].forEach((P,r)=>{const y0=26+r*40;let py=null;
+sg.forEach(([a,b,m])=>{const[p,n]=stt(m),y=P===p?y0-12:P===n?y0+12:y0;
+if(py!==null&&py!==y)S('line',{x1:X(a),x2:X(a),y1:py,y2:y,stroke:COL[P],'stroke-width':2},wv);
+S('line',{x1:X(a),x2:X(b),y1:y,y2:y,stroke:COL[P],'stroke-width':y===y0?1:2.5,'stroke-dasharray':y===y0?'3 3':''},wv);py=y});
+S('text',{x:4,y:y0+4,'font-size':13,'font-weight':700,fill:COL[P]},wv).textContent=P});
+[0,180,360].forEach(a=>S('text',{x:X(a),y:136,'font-size':10,'text-anchor':'middle',fill:'var(--mu)'},wv).textContent=a+'°');
+cur=S('line',{y1:6,y2:124,stroke:'var(--fg)','stroke-width':1.5},wv)}
+function drawT(){$('tb').innerHTML=HALL.map((h,m)=>{const[p,n]=stt(m);return`<tr id="r${m}"><td>${h}</td><td>${p}+</td><td>${n}−</td><td>${'ABC'.replace(p,'').replace(n,'')}</td></tr>`}).join('');lm=-1}
+function setS(m){const[p,n]=stt(m);
+coils.forEach(o=>{const s=o.ph===p?'+':o.ph===n?'−':'';o.c.setAttribute('fill-opacity',s==='+'?.9:s?.5:.08);o.t.textContent=s});
+for(const P in leg){const o=leg[P],a=P===p,b=P===n;
+o.h.setAttribute('fill',a?'var(--on)':'var(--cd)');o.ht.textContent=a?'PWM':'off';o.ht.setAttribute('fill',a?'#fff':'var(--mu)');
+o.l.setAttribute('fill',b?'var(--on)':'var(--cd)');o.lt.textContent=b?'ON':'off';o.lt.setAttribute('fill',b?'#fff':'var(--mu)')}
+document.querySelectorAll('tr.a').forEach(e=>e.classList.remove('a'));$('r'+m).classList.add('a');lm=m}
+function frame(t){const dt=Math.min(.03,(t-last)/1000||0);last=t;
+for(let i=0;i<4;i++){const m=comm?sec(th):man,g=Math.sin((fld(m)-th)*R),T=g*u-(w/W0)*g*g;
+w+=K*(T-(comm?.15:1.2)*w/W0)*dt/4;th=((th+w/R*dt/4)%360+360)%360}
+const m=comm?sec(th):man,f=fld(m);if(m!==lm)setS(m);
+rot.setAttribute('transform','rotate('+(-th)+' 150 150)');fa.setAttribute('transform','translate(150 150) rotate('+(-f)+')');
+cur.setAttribute('x1',X(th));cur.setAttribute('x2',X(th));
+const lead=((f-th+540)%360)-180;
+$('info').innerHTML='Hall ABC: <b>'+HALL[sec(th)]+'</b> &nbsp; Speed: <b>'+Math.round(Math.abs(w)/W0*100)+'%</b> of max<br>Angle between fields: <b>'+Math.round(lead)+'°</b> &nbsp; Torque factor sin(angle): <b>'+Math.sin(lead*R).toFixed(2)+'</b>';
+requestAnimationFrame(frame)}
+$('du').oninput=e=>{u=e.target.value/100;$('duv').textContent=e.target.value+'%'};
+$('cm').onchange=e=>{comm=e.target.checked;man=sec(th);$('st').disabled=comm};
+$('st').onclick=()=>{man=(man+(dir>0?1:5))%6};
+$('dr').onclick=()=>{dir=-dir;$('dr').textContent='Direction: '+(dir>0?'forward':'reverse');man=sec(th);drawW();drawT()};
+drawW();drawT();requestAnimationFrame(frame);
+</script></body></html>
